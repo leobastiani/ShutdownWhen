@@ -1,0 +1,364 @@
+unit Main;
+
+interface
+
+uses
+  Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
+  Dialogs, ExtCtrls, StdCtrls, ShellAPI;
+
+type
+  TMainForm = class(TForm)
+    novaFotoBtn: TButton;
+    compararBtn: TButton;
+    Imagem: TImage;
+    cortarBtn: TButton;
+    grupoImagemOriginal: TGroupBox;
+    cursorBtn: TButton;
+    recortarBtn: TButton;
+    Shape: TShape;
+    autoComparar: TTimer;
+    Comando: TLabeledEdit;
+    Console: TMemo;
+    execBtn: TButton;
+    cancelarBtn: TButton;
+    settingsGroup: TGroupBox;
+    lentoBtn: TButton;
+    rapidoBtn: TButton;
+    secIntervalEdt: TLabeledEdit;
+    countdownEdt: TLabeledEdit;
+    procedure novaFotoBtnClick(Sender: TObject);
+    procedure ImagemMouseMove(Sender: TObject; Shift: TShiftState; X,
+      Y: Integer);
+    procedure FormCreate(Sender: TObject);
+    procedure ImagemMouseDown(Sender: TObject; Button: TMouseButton;
+      Shift: TShiftState; X, Y: Integer);
+    procedure ImagemMouseUp(Sender: TObject; Button: TMouseButton;
+      Shift: TShiftState; X, Y: Integer);
+    procedure cursorBtnClick(Sender: TObject);
+    procedure recortarBtnClick(Sender: TObject);
+    procedure cortarBtnClick(Sender: TObject);
+    procedure CarregarImagem();
+    procedure compararBtnClick(Sender: TObject); // tira uma screenshot
+    procedure SS(output: String); // tira uma screenshot
+    procedure Cortar(arquivo: String);
+    procedure autoCompararTimer(Sender: TObject);
+    procedure cmd(aCommando: String);
+    procedure Travar(Bool: Boolean);
+    procedure execBtnClick(Sender: TObject);
+    procedure cancelarBtnClick(Sender: TObject);
+    procedure NovosValores(Sender: TObject);
+    procedure lentoBtnClick(Sender: TObject);
+    procedure rapidoBtnClick(Sender: TObject);
+    procedure FormClose(Sender: TObject; var Action: TCloseAction);
+    procedure FormResize(Sender: TObject);
+  private
+    { Private declarations }
+  public
+    { Public declarations }
+  end;
+
+var
+  MainForm: TMainForm;
+  imagemCliqueX, imagemCliqueY: Integer; // assim que você clica na imagem, você pode arrastá-la,
+  // se forem diferentes de 0
+  crop: String; // string que diz como deve ser feito o corte
+  defaultCommand: String;
+  sec_interval, countdown: Integer;
+
+implementation
+
+{$R *.dfm}
+
+function FileCompare(Filename1, Filename2: string): boolean;
+var
+	f1, f2: file;
+	ch1, ch2: char;
+begin
+	AssignFile(f1, Filename1); 
+	Reset(f1, 1);
+	AssignFile(f2, Filename2);
+	Reset(f2, 1);
+	Result := FileSize(f1) = FileSize(f2); { check their sizes }
+	while Result and (not eof(f1)) do
+	begin // while size & contents are
+		BlockRead(f1, ch1, SizeOf(ch1)); // the same keep on reading
+		BlockRead(f2, ch2, SizeOf(ch2));
+		Result := ch1 = ch2; // compare a single byte
+	end;
+	CloseFile(f1);
+	CloseFile(f2);
+end;
+
+procedure TMainForm.cmd(aCommando: String);
+var
+  tmpStartupInfo: TStartupInfo;
+  tmpProcessInformation: TProcessInformation;
+  tmpProgram: String;
+begin
+  tmpProgram := trim(aCommando);
+  FillChar(tmpStartupInfo, SizeOf(tmpStartupInfo), 0);
+  with tmpStartupInfo do
+  begin
+    cb := SizeOf(TStartupInfo);
+    wShowWindow := SW_HIDE;
+  end;
+
+  if CreateProcess(nil, pchar(tmpProgram), nil, nil, true, CREATE_NO_WINDOW,
+    nil, nil, tmpStartupInfo, tmpProcessInformation) then
+  begin
+    // loop every 100 ms
+    while WaitForSingleObject(tmpProcessInformation.hProcess, 100) > 0 do
+    begin
+      Application.ProcessMessages;
+    end;
+    CloseHandle(tmpProcessInformation.hProcess);
+    CloseHandle(tmpProcessInformation.hThread);
+  end
+  else
+  begin
+    RaiseLastOSError;
+  end;
+  Console.Lines.Add(aCommando);
+end;
+
+procedure TMainForm.SS(output: String); // tira uma screenshot
+begin
+  cmd('nircmd savescreenshot '+output);
+end;
+
+procedure TMainForm.autoCompararTimer(Sender: TObject);
+begin
+  SS('Comparar.bmp');
+  Cortar('Comparar.bmp');
+  if not FileCompare('Original.bmp', 'Comparar.bmp') then
+  begin
+    countdown := countdown - sec_interval;
+    Console.Lines.Add('Imagens diferentes em '+TimeToStr(Now)+'. Contagem regressiva '+IntToStr(countdown)+'s');
+  end
+  else if countdown <> strToInt(countdownEdt.Text) then
+  begin
+    Console.Lines.Add('Imagem iguais em '+TimeToStr(Now)+'. Recomeçando a contagem');
+    countdown := strToInt(countdownEdt.Text);
+  end;
+
+  if countdown <= 0 then
+  begin
+    Console.Lines.Add('Teste de comparação finalizado com sucesso');
+    cmd(Comando.Text);
+    Travar(False);
+  end;
+end;
+
+procedure TMainForm.cancelarBtnClick(Sender: TObject);
+begin
+  Travar(False);
+  Console.Lines.Add('Temporizador cancelado');
+end;
+
+procedure TMainForm.CarregarImagem();
+begin
+  Imagem.Picture.LoadFromFile('Original.bmp');
+  Imagem.Width  := Imagem.Picture.Bitmap.Width;
+  Imagem.Height := Imagem.Picture.Bitmap.Height;
+  Imagem.Left   := 16;
+  Imagem.Top    := 24;
+  Shape.Width   := 0;
+  Shape.Height  := 0;
+end;
+
+procedure TMainForm.Cortar(arquivo: String);
+begin
+  cmd('ffmpeg -y -i '+arquivo+' '+crop+' '+arquivo);
+end;
+
+procedure TMainForm.Travar(Bool: Boolean);
+begin
+  autoComparar.Enabled   := Bool; // temporizador
+  cancelarBtn.Enabled    := Bool;
+  compararBtn.Enabled    := not Bool;
+  cursorBtn.Enabled      := not Bool;
+  recortarBtn.Enabled    := not Bool;
+  Imagem.Enabled         := not Bool;
+  novaFotoBtn.Enabled    := not Bool;
+  cortarBtn.Enabled      := not Bool;
+  lentoBtn.Enabled       := not Bool;
+  rapidoBtn.Enabled      := not Bool;
+  secIntervalEdt.Enabled := not Bool;
+  countdownEdt.Enabled   := not Bool;
+end;
+
+procedure TMainForm.compararBtnClick(Sender: TObject);
+begin
+  if crop = '' then
+  begin
+    Console.Lines.Add('Não foi especificado como cortar a imagem');
+    exit;
+  end;
+  Travar(True);
+  Console.Lines.Add('Processo de comparação iniciado');
+end;
+
+procedure TMainForm.cortarBtnClick(Sender: TObject);
+var
+  l, t, w, h: Integer;
+begin
+  l := Shape.Left - Imagem.Left;
+  t := Shape.Top  - Imagem.Top;
+  w := Shape.Width;
+  h := Shape.Height;
+  if (w = 0) or (h = 0) then
+  begin
+    Console.Lines.Add('Você deve selecionar uma área que o corte seja feito');
+    exit;
+  end;
+  crop := '-vf crop='
+    +IntToStr(w)+':'
+    +IntToStr(h)+':'
+    +IntToStr(l)+':'
+  +IntToStr(t);
+  Cortar('Original.bmp');
+  CarregarImagem();
+end;
+
+procedure TMainForm.cursorBtnClick(Sender: TObject);
+begin
+  cursorBtn.Font.Style := [fsBold];
+  recortarBtn.Font.Style := [];
+  Shape.Width  := 0;
+  Shape.Height := 0;
+  Imagem.Cursor := crDefault;
+end;
+
+procedure TMainForm.execBtnClick(Sender: TObject);
+begin
+  cmd(Comando.Text);
+end;
+
+procedure TMainForm.FormClose(Sender: TObject; var Action: TCloseAction);
+begin
+  Console.Lines.SaveToFile('log.txt');
+end;
+
+procedure TMainForm.FormCreate(Sender: TObject);
+begin
+  sec_interval := strToInt(secIntervalEdt.Text);
+  countdown    := strToInt(countdownEdt.Text);
+  defaultCommand := Comando.Text;
+  autoComparar.Interval := sec_interval * 1000;
+
+  crop := '';
+
+  imagemCliqueX:=0;
+  imagemCliqueY:=0;
+
+  Shape.Height := 0;
+  Shape.Width  := 0;
+
+  cursorBtn.Click;
+end;
+
+procedure TMainForm.FormResize(Sender: TObject);
+begin
+  // comando e log
+  Comando.Left := Width - 338;
+  Console.Left := Width - 338;
+  execBtn.Left := Width - 75;
+
+end;
+
+procedure TMainForm.ImagemMouseDown(Sender: TObject; Button: TMouseButton;
+  Shift: TShiftState; X, Y: Integer);
+begin
+  imagemCliqueX := Mouse.CursorPos.X - Imagem.Left;
+  imagemCliqueY := Mouse.CursorPos.Y - Imagem.Top;
+  if recortarBtn.Font.Style = [fsBold] then
+  begin
+    Shape.Left   := X + Imagem.Left;
+    Shape.Top    := Y + Imagem.Top;
+    Shape.Width  := 0;
+    Shape.Height := 0;
+  end;
+end;
+
+procedure TMainForm.ImagemMouseMove(Sender: TObject; Shift: TShiftState; X,
+  Y: Integer);
+begin
+  if imagemCliqueX = 0 then
+  begin
+    exit;
+  end;
+  if cursorBtn.Font.Style = [fsBold] then
+  begin
+    Imagem.Left := Mouse.CursorPos.X - imagemCliqueX;
+    Imagem.Top  := Mouse.CursorPos.Y - imagemCliqueY;
+  end;
+  if recortarBtn.Font.Style = [fsBold] then
+  begin
+    Shape.Width  := Mouse.CursorPos.X - imagemCliqueX - Imagem.Left;
+    Shape.Height := Mouse.CursorPos.Y - imagemCliqueY - Imagem.Top;
+    if Shape.Width < 0 then
+      Shape.Width := 0;
+    if Shape.Height < 0 then
+      Shape.Height := 0;
+  end;
+end;
+
+procedure TMainForm.ImagemMouseUp(Sender: TObject; Button: TMouseButton;
+  Shift: TShiftState; X, Y: Integer);
+begin
+  imagemCliqueX := 0;
+  imagemCliqueY := 0;
+end;
+
+procedure TMainForm.lentoBtnClick(Sender: TObject);
+begin
+  secIntervalEdt.Text := '60';
+  countdownEdt.Text   := '180';
+  NovosValores(Sender);
+end;
+
+procedure TMainForm.novaFotoBtnClick(Sender: TObject);
+begin
+  SS('Original.bmp');
+  CarregarImagem();
+end;
+
+procedure TMainForm.rapidoBtnClick(Sender: TObject);
+begin
+  secIntervalEdt.Text := '30';
+  countdownEdt.Text   := '30';
+  NovosValores(Sender);
+end;
+
+procedure TMainForm.recortarBtnClick(Sender: TObject);
+begin
+  cursorBtn.Font.Style   := [];
+  recortarBtn.Font.Style := [fsBold];
+  Imagem.Cursor := crCross;
+end;
+
+procedure TMainForm.NovosValores(Sender: TObject);
+var
+  new_sec_interval, new_countdown: Integer;
+begin
+  try
+    new_sec_interval := strToInt(secIntervalEdt.Text);
+    new_countdown    := strToInt(countdownEdt.Text);
+    // testando se houve alteração
+    if (new_sec_interval = sec_interval) and (new_countdown = countdown) then
+    begin
+    	// não houve alterações
+    	exit;
+    end;
+    // após ter feito os testes
+    sec_interval := strToInt(secIntervalEdt.Text);
+    countdown    := strToInt(countdownEdt.Text);
+    // definindo valores, fora as variáveis
+	  autoComparar.Interval := sec_interval * 1000;
+    Console.Lines.Add('Novas configurações salvas');
+  except
+    Console.Lines.Add('As novas configurações não foram aplicadas');
+  end;
+end;
+
+end.
