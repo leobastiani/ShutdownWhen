@@ -1,8 +1,12 @@
-py -3 -m py2exe.build_exe shutdownWnet.py -c -b 0 -O
-py -3 -m py2exe.build_exe shutdownWhd.py  -c -b 0 -O
-py -3 -m py2exe.build_exe shutdownWcpu.py -c -b 0 -O
+@ECHO OFF
+SETLOCAL EnableDelayedExpansion
+
+pyinstaller -F shutdownWnet.py
+pyinstaller -F shutdownWhd.py
+pyinstaller -F shutdownWcpu.py
 
 
 
-cd dist
+pushd dist
 7z a ShutdownWhen.zip shutdownWnet.exe shutdownWhd.exe shutdownWcpu.exe ../shutdownWss/shutdownWss.zip
+popd

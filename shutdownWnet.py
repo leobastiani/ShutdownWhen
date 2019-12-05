@@ -36,7 +36,7 @@ class ShutdownWnet(ShutdownW):
 
 
         # tratando output
-        matches = re.findall('\d+', output)
+        matches = re.findall(r'\d+', output)
         download = int(matches[0])
         upload = int(matches[1])
 
